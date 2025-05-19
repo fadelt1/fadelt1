@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>FADEL T1 PY - CONSULTA DE VIAJES</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    input, select, button { padding: 8px; margin: 5px 0; }
+    table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+    th { background-color: #002060; color: white; font-weight: bold; } /* Azul oscuro con letra blanca */
+    th:last-child { background-color: #C00000; } /* Rojo exclusivo para "RV GENERAL" */
+    td { padding: 8px; border: 1px solid #ccc; text-align: left; }
+    footer { text-align: center; padding: 10px; background-color: #002060; color: white; font-weight: bold; }
+  </style>
+</head>
+<body>
+  <h1>FADEL T1 PY - CONSULTA DE VIAJES</h1>
+  
+  <label for="ciInput">Ingrese CI:</label>
+  <input type="text" id="ciInput" placeholder="Ej: 7097243">
+
+  <label for="fechaInicio">Fecha Inicio:</label>
+  <input type="date" id="fechaInicio">
+
+  <label for="fechaFin">Fecha Fin:</label>
+  <input type="date" id="fechaFin">
+
+  <button id="btnFiltrar">Ver Viajes</button>
+  
+  <div id="resultado"></div>
+
+  <script>
+    async function obtenerViajesDesdeFirebase() {
+        const url = "https://toten-paraguay-5d90f-default-rtdb.firebaseio.com/.json"; 
+
+        try {
+            const respuesta = await fetch(url);
+            if (!respuesta.ok) throw new Error("No se pudo cargar los datos de Firebase");
+
+            const datos = await respuesta.json();
+
+            if (!datos || Object.keys(datos).length === 0) {
+                console.error("No hay datos disponibles en Firebase");
+                document.getElementById("resultado").innerHTML = "<p>No se encontraron viajes.</p>";
+                return;
+            }
+
+            const viajes = Object.values(datos);
+            mostrarViajes(viajes);
+        } catch (error) {
+            console.error("Error al obtener los datos:", error);
+        }
+    }
+
+    function formatearFecha(fechaTexto) {
+        if (!fechaTexto) return "Fecha no disponible";  
+        const partes = fechaTexto.split("/");
+        if (partes.length !== 3) return "Fecha inválida";  
+
+        const [dia, mes, año] = partes;
+        return `${año}-${mes.padStart(2, "0")}-${dia.padStart(2, "0")}`;  
+    }
+
+    function formatearMoneda(valor) {
+        if (!valor) return "₲ 0";
+
+        const numero = parseFloat(typeof valor === "number" ? valor.toString() : valor.replace(/[^\d]/g, ""));
+        return isNaN(numero) ? "₲ 0" : `₲ ${numero.toLocaleString("es-PY")}`;
+    }
+
+    function mostrarViajes(viajes) {
+        const resultadoDiv = document.getElementById("resultado");
+        resultadoDiv.innerHTML = "";
+
+        const ciFiltro = document.getElementById("ciInput").value.trim();
+        const fechaInicio = document.getElementById("fechaInicio").value;
+        const fechaFin = document.getElementById("fechaFin").value;
+
+        const fechaInicioObj = fechaInicio ? new Date(fechaInicio + "T00:00:00") : null;
+        const fechaFinObj = fechaFin ? new Date(fechaFin + "T23:59:59") : null;
+
+        let totalRVGeneral = 0;
+        let totalViatico = 0;
+
+        const viajesFiltrados = viajes.filter(viaje => {
+            const cumpleCI = ciFiltro ? String(viaje["CI"]) === ciFiltro : true;
+            const fechaViaje = viaje["DATA DA VIAGEM"] ? new Date(formatearFecha(viaje["DATA DA VIAGEM"])) : null;
+            const cumpleFecha = fechaViaje ? (!fechaInicioObj || fechaViaje >= fechaInicioObj) && (!fechaFinObj || fechaViaje <= fechaFinObj) : true;
+
+            return cumpleCI && cumpleFecha;
+        });
+
+        if (!viajesFiltrados.length) {
+            resultadoDiv.innerHTML = "<p>No se encontraron viajes con los filtros aplicados.</p>";
+            return;
+        }
+
+        let tabla = `<table>
+            <tr>
+                <th>Fecha</th><th>Chofer</th><th>Origen</th><th>Destino</th>
+                <th>Flota</th><th>DT</th><th>Viático</th><th>CI</th><th>Tipo</th><th>RV General</th>
+            </tr>`;
+
+        viajesFiltrados.forEach(viaje => {
+            if (!viaje) return; 
+
+            const fecha = viaje["DATA DA VIAGEM"] ? new Date(formatearFecha(viaje["DATA DA VIAGEM"])).toLocaleDateString("es-ES") : "Fecha no disponible";
+
+            const rvGeneral = parseFloat(viaje["RV GENERAL"]);
+            const viatico = parseFloat(typeof viaje["VIATICO"] === "string" ? viaje["VIATICO"].replace(/[^\d]/g, "") : viaje["VIATICO"]);
+
+            totalRVGeneral += isNaN(rvGeneral) ? 0 : rvGeneral;
+            totalViatico += isNaN(viatico) ? 0 : viatico;
+
+            tabla += `<tr>
+                <td>${fecha}</td><td>${viaje["MOTORISTA 1"] || "No disponible"}</td><td>${viaje["ORIGEM IDA"] || "No disponible"}</td>
+                <td>${viaje["DESTINO IDA"] || "No disponible"}</td><td>${viaje["FLOTA "] || "No disponible"}</td>
+                <td>${viaje["DT"] || "No disponible"}</td><td>${formatearMoneda(viatico)}</td>
+                <td>${viaje["CI"] || "No disponible"}</td><td>${viaje["TIPO"] || "No disponible"}</td>
+                <td>${formatearMoneda(rvGeneral)}</td>
+            </tr>`;
+        });
+
+        tabla += `<tr style="font-weight: bold; background-color: #f0f0f0;">
+            <td colspan="6">TOTAL</td>
+            <td>${formatearMoneda(totalViatico)}</td>
+            <td></td><td></td>
+            <td>${formatearMoneda(totalRVGeneral)}</td>
+        </tr>`;
+
+        tabla += "</table>";
+        resultadoDiv.innerHTML = tabla;
+    }
+
+    document.getElementById("btnFiltrar").addEventListener("click", obtenerViajesDesdeFirebase);
+  </script>
+
+  <footer>
+    © 2025 FADEL T1 PY. Todos los derechos reservados.
+  </footer>
+
+  <a href="https://wa.me/595984770132" target="_blank" style="
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      background-color: #25D366;
+      color: white;
+      font-size: 18px;
+      font-weight: bold;
+      padding: 12px 15px;
+      border-radius: 50px;
+      box-shadow: 0px 4px 6px rgba(0,0,0,0.1);
+      text-decoration: none;
+      display: flex;
+      align-items: center;">
+      📲 Solicitar Ajuste
+  </a>
+</body>
+</html>
